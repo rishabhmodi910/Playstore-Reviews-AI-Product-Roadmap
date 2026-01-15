@@ -1,14 +1,18 @@
-# AI-Powered Google Play Store Review Analyzer 🚀
+# 🚀 AI-Powered Google Play Store Review Analyzer
 
-An automated tool that scrapes user reviews from the Google Play Store and uses Google Gemini AI to analyze feedback, classify issues (Bugs vs. Features), and generate a strategic Product Roadmap.
+![Python](https://img.shields.io/badge/Python-3.9%2B-blue)
+![AI](https://img.shields.io/badge/AI-Google_Gemini-orange)
+![License](https://img.shields.io/badge/License-MIT-green)
 
-## Features
+An automated tool that scrapes user reviews from the Google Play Store and uses **Google Gemini AI** to analyze feedback, classify issues (Bugs vs. Features), and generate a strategic **Product Roadmap**.
 
-*   **Scrape Reviews**: Fetch thousands of reviews for any app on the Play Store (supports country/language filtering).
-*   **AI Analysis**: Uses Google Gemini (Flash/Pro) to classify reviews into "Bug Reports", "Feature Requests", or "General Feedback".
-*   **Prioritization**: Automatically assigns High/Medium/Low priority based on sentiment and urgency.
-*   **Roadmap Generation**: Creates a professional Product Roadmap (Markdown) summarizing critical fixes and strategic pillars.
-*   **Cost Estimation**: Tracks estimated API costs for the analysis.
+## 🌟 Features
+
+* **📱 Scrape Reviews:** Fetch thousands of reviews for any app on the Play Store (supports country/language filtering).
+* **🧠 AI Analysis:** Uses Google Gemini (Flash/Pro) to classify reviews into `Bug Reports`, `Feature Requests`, or `General Feedback`.
+* **🔥 Prioritization:** Automatically assigns **High/Medium/Low** priority based on sentiment and urgency.
+* **🗺️ Roadmap Generation:** Creates a professional Product Roadmap (Markdown) summarizing critical fixes and strategic pillars.
+* **💰 Cost Estimation:** Tracks estimated API costs for the analysis token usage.
 
 ## Installation
 
