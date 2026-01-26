@@ -12,7 +12,13 @@ def run_test():
     print("========================================")
     
     # 1. Configure
-    print(f"🔑 Configuring API with key ending in ...{GEMINI_API_KEY[-4:]}")
+    if GEMINI_API_KEY and GEMINI_API_KEY != "YOUR_API_KEY_HERE":
+        print("🔑 Configuring API with provided key...")
+    else:
+        print("⚠️  No API key found. Please set GEMINI_API_KEY environment variable.")
+        print("   Get your key from: https://aistudio.google.com/")
+        return
+    
     try:
         genai.configure(api_key=GEMINI_API_KEY)
     except Exception as e:

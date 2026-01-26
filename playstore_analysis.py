@@ -4,61 +4,71 @@ import os
 import google.generativeai as genai
 import time
 
-# Replace with your actual API key
+# API Key Configuration
 # SECURITY WARNING: Do not commit your actual API key to GitHub!
-# Use an environment variable or a separate config file that is ignored by git.
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "YOUR_API_KEY_HERE")
+# Priority: 1. Environment variable, 2. User input prompt
+GEMINI_API_KEY = None
+
+# Model Configuration
+MODEL_NAME = 'models/gemini-2.5-pro'
 
 BATCH_SIZE = 10  # Increase to 50 to save (marginal) cost and improve speed
 
+def get_api_key():
+    """
+    Gets the API key from environment variable or prompts user for input.
+    """
+    global GEMINI_API_KEY
+    
+    # Try environment variable first
+    api_key = os.getenv("GEMINI_API_KEY")
+    
+    if api_key and api_key != "YOUR_API_KEY_HERE":
+        GEMINI_API_KEY = api_key
+        print("✅ Using API key from environment variable.")
+        return api_key
+    
+    # Prompt user for API key
+    print("\n🔑 API Key Required")
+    print("   Get your key from: https://aistudio.google.com/")
+    api_key = input("   Enter your Gemini API key: ").strip()
+    
+    if not api_key:
+        raise ValueError("❌ API key is required. Please set GEMINI_API_KEY environment variable or provide it when prompted.")
+    
+    GEMINI_API_KEY = api_key
+    return api_key
+
 def configure_llm():
     """
-    Configures the Google Gemini API and returns a list of available models.
+    Configures the Google Gemini API and returns the model name.
+    Uses Gemini 2.5 Pro model.
     """
-    genai.configure(api_key=GEMINI_API_KEY)
+    api_key = get_api_key()
+    genai.configure(api_key=api_key)
     
     try:
-        # Dynamically find a supported model
+        # Verify the model is available
         all_models = list(genai.list_models())
         available_models = [m.name for m in all_models if 'generateContent' in m.supported_generation_methods]
-        print(f"🔎 Found {len(available_models)} active models: {available_models}")
         
-        # Priority list of models to try
-        preferences = [
-            'models/gemini-3-flash-preview',
-            'models/gemini-2.5-flash',
-            'models/gemini-2.5-pro',
-            'models/gemini-1.5-flash',
-            'models/gemini-1.5-pro',
-            'models/gemini-1.0-pro',
-            'models/gemini-pro'
-        ]
-        
-        valid_models = []
-        for pref in preferences:
-            if pref in available_models:
-                valid_models.append(pref)
-        
-        # Add remaining available models
-        for m in available_models:
-            if 'gemini' in m and m not in valid_models:
-                valid_models.append(m)
-                
-        if valid_models:
-            print(f"🤖 AI Models available for rotation: {valid_models}")
-            return valid_models
+        if MODEL_NAME in available_models:
+            print(f"✅ Using model: {MODEL_NAME}")
+            return MODEL_NAME
+        else:
+            print(f"⚠️ Warning: {MODEL_NAME} not found in available models.")
+            print(f"   Available models: {available_models[:5]}...")
+            print(f"   Attempting to use {MODEL_NAME} anyway...")
+            return MODEL_NAME
                 
     except Exception as e:
         print(f"⚠️ Model discovery failed (Check API Key/Network): {e}")
+        print(f"   Will attempt to use {MODEL_NAME} anyway...")
+        return MODEL_NAME
 
-    # Ultimate fallback
-    print("⚠️ Using hardcoded fallback list.")
-    return ['models/gemini-1.5-flash', 'models/gemini-pro']
-
-def analyze_reviews_batch(model_names, reviews, app_context):
+def analyze_reviews_batch(model_name, reviews, app_context):
     """
     Sends a batch of reviews to the LLM for classification and prioritization.
-    Rotates through models if rate limits are hit.
     """
     indexed_reviews = "\n".join([f"[{i}] {r}" for i, r in enumerate(reviews)])
     
@@ -79,42 +89,37 @@ def analyze_reviews_batch(model_names, reviews, app_context):
     [1] General Feedback | Low
     """
     
-    for model_name in model_names:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            results = {}
-            if response.text:
-                lines = response.text.strip().split('\n')
-                for line in lines:
-                    if '[' in line and ']' in line and '|' in line:
-                        try:
-                            idx_str = line.split('[')[1].split(']')[0]
-                            idx = int(idx_str)
-                            parts = line.split(']')[1].split('|')
-                            if len(parts) >= 2:
-                                results[idx] = (parts[0].strip(), parts[1].strip())
-                        except:
-                            continue
-            
-            # Return ordered list
-            output = []
-            for i in range(len(reviews)):
-                output.append(results.get(i, ("General Feedback", "Low")))
-            return output
+    try:
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        results = {}
+        if response.text:
+            lines = response.text.strip().split('\n')
+            for line in lines:
+                if '[' in line and ']' in line and '|' in line:
+                    try:
+                        idx_str = line.split('[')[1].split(']')[0]
+                        idx = int(idx_str)
+                        parts = line.split(']')[1].split('|')
+                        if len(parts) >= 2:
+                            results[idx] = (parts[0].strip(), parts[1].strip())
+                    except:
+                        continue
+        
+        # Return ordered list
+        output = []
+        for i in range(len(reviews)):
+            output.append(results.get(i, ("General Feedback", "Low")))
+        return output
 
-        except Exception as e:
-            print(f"⚠️ Error with {model_name}: {e}. Switching model...")
-            time.sleep(1)
-            continue
+    except Exception as e:
+        print(f"⚠️ Error with {model_name}: {e}")
+        print(f"   Returning default classifications for this batch.")
+        return [("General Feedback", "Low")] * len(reviews)
 
-    # Fallback if all models fail
-    print(f"⚠️ All models failed for this batch.")
-    return [("General Feedback", "Low")] * len(reviews)
-
-def generate_roadmap(model_names, df, app_context, output_dir):
+def generate_roadmap(model_name, df, app_context, output_dir):
     """
-    Generates a strategic roadmap based on the analyzed reviews.
+    Generates a tactical product roadmap based on the analyzed reviews.
     """
     print(f"\n🗺️  Generating Product Roadmap for {app_context}...")
     
@@ -123,69 +128,64 @@ def generate_roadmap(model_names, df, app_context, output_dir):
     # We look at high priority bugs to see what needs fixing immediately
     critical_bugs = df[(df['category'] == 'Bug Report') & (df['priority'] == 'High')]['review_text'].tolist()
     
-    # Take a sample to fit in context (Gemini 1.5 Flash has a large context, but we limit for speed)
+    # Take a sample to fit in context
     features_sample = "\n- ".join(features[:50]) 
     bugs_sample = "\n- ".join(critical_bugs[:20])
     
     prompt = f"""
-    You are the Chief Product Officer (CPO) for the mobile application '{app_context}'.
-    Your goal is to create a professional, strategic Product Roadmap document based on recent user feedback.
+**Context:**
+- **App Name:** {app_context}
+- **Input Data:** Segmented raw feedback from the Play Store.
+
+**User Feedback Data:**
+*Feature Requests:*
+{features_sample}
+
+*Critical Bug Reports:*
+{bugs_sample}
+
+**Instructions:**
+Analyze the data above and generate a Tactical Product Roadmap. 
+Avoid corporate jargon. Be specific, technical, and solution-oriented.
+
+**Deliverable Structure (Markdown):**
+
+# Tactical Roadmap: {app_context}
+
+## 1. The "Must-Fix" List (Immediate Engineering Priority)
+*Identify the bugs that are functionally breaking the app. For each, provide:*
+- **Defect:** [Specific name of the bug]
+- **User Impact:** [What the user is unable to do]
+- **Success Criteria:** [E.g., "Crash rate drops below 1%" or "Login succeeds in <2s"]
+
+## 2. Feature Enhancements (The "Quick Wins")
+*Identify requested features that offer high value with seemingly low complexity.*
+- **Feature:** [Name]
+- **User Story:** As a [user type], I want to [action] so that [benefit].
+- **Implementation Hint:** [Based on the request, what specifically needs to change in the UI or backend?]
+
+## 3. Strategic Feature Bets (Complex Requests)
+*Major feature requests that require significant dev time.*
+- **Initiative:** [Name]
+- **Problem Solved:** [Why do users want this?]
+- **Risk/Complexity:** [High/Medium - Assess based on the nature of the request]
+
+## 4. Discarded Suggestions (Out of Scope)
+*List 2-3 requests you are choosing NOT to build right now and why (e.g., too niche, technically infeasible based on current context).*
+"""
     
-    **Context:**
-    - **App Name:** {app_context}
-    - **Input Data:** A sample of recent high-priority bug reports and feature requests from the Google Play Store.
-    
-    **User Feedback Summary:**
-    *Feature Requests (Voice of the Customer):*
-    {features_sample}
-    
-    *Critical Bug Reports (Pain Points):*
-    {bugs_sample}
-    
-    **Deliverable:**
-    Generate a formal Product Roadmap Document in Markdown format. The tone should be professional, data-driven, and strategic.
-    
-    **Document Structure:**
-    
-    # Product Strategy & Roadmap: {app_context}
-    
-    ## 1. Executive Summary
-    *   Briefly analyze the current sentiment and the industry vertical.
-    *   Summarize the core problem areas and the biggest opportunities identified in the feedback.
-    
-    ## 2. Strategic Pillars for Next Quarter
-    *   Define 3 key themes (e.g., "Stability First", "User Engagement") derived from the feedback.
-    
-    ## 3. Critical Firefighting (Immediate Priority)
-    *   List the top 3-5 most critical bugs that must be fixed immediately to prevent churn.
-    *   *Format:* **[Issue Name]**: Brief description and impact.
-    
-    ## 4. Feature Roadmap (Prioritized)
-    *   Propose 3-5 new features or enhancements based on user requests.
-    *   *Format:* **[Feature Name]** (Priority: High/Medium): Why this matters.
-    
-    ## 5. Blue Sky Innovation (Competitive Advantage)
-    *   Suggest 2 industry-specific features that users haven't explicitly asked for but would differentiate {app_context} from competitors.
-    
-    ## 6. Success Metrics (KPIs)
-    *   Suggest 3 Key Performance Indicators to track the success of this roadmap.
-    """
-    
-    for model_name in model_names:
-        try:
-            model = genai.GenerativeModel(model_name)
-            response = model.generate_content(prompt)
-            if response.text:
-                roadmap_path = os.path.join(output_dir, f"{app_context}_roadmap.md")
-                with open(roadmap_path, "w", encoding="utf-8") as f:
-                    f.write(response.text)
-                print(f"✅ Roadmap generated! Saved to: {roadmap_path}")
-                return
-        except Exception as e:
-            print(f"⚠️ Roadmap generation failed with {model_name}: {e}. Switching...")
-            continue
-            
-    print("❌ Roadmap generation failed with all available models.")
+    try:
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        if response.text:
+            roadmap_path = os.path.join(output_dir, f"{app_context}_roadmap.md")
+            with open(roadmap_path, "w", encoding="utf-8") as f:
+                f.write(response.text)
+            print(f"✅ Roadmap generated! Saved to: {roadmap_path}")
+        else:
+            print("❌ Roadmap generation failed: Empty response from model.")
+    except Exception as e:
+        print(f"❌ Roadmap generation failed: {e}")
 
 def analyze_dataset(file_path):
     print(f"\n🔄 Analyzing: {file_path}")
@@ -198,7 +198,7 @@ def analyze_dataset(file_path):
 
         # Setup LLM
         try:
-            model_names = configure_llm()
+            model_name = configure_llm()
         except Exception as e:
             print(f"❌ Failed to configure LLM: {e}")
             return
@@ -208,43 +208,75 @@ def analyze_dataset(file_path):
         app_context = filename.replace("_reviews.csv", "").replace("_analyzed_ai.csv", "")
 
         print("🤖 AI Analysis in progress... (Batch processing)")
+        print("   💡 Tip: Press Ctrl+C to interrupt and save partial results (requires ≥200 reviews for roadmap)")
+        print()
         
         categories = []
         priorities = []
         total = len(df)
         all_reviews = df['review_text'].tolist()
+        analyzed_count = 0
+        MIN_REVIEWS_FOR_ROADMAP = 200
 
-        for i in range(0, total, BATCH_SIZE):
-            batch = all_reviews[i : i + BATCH_SIZE]
-            batch_results = analyze_reviews_batch(model_names, batch, app_context)
+        try:
+            for i in range(0, total, BATCH_SIZE):
+                batch = all_reviews[i : i + BATCH_SIZE]
+                batch_results = analyze_reviews_batch(model_name, batch, app_context)
+                
+                for cat, prio in batch_results:
+                    categories.append(cat)
+                    priorities.append(prio)
+                
+                analyzed_count = len(categories)
+                print(f"   Processed {analyzed_count}/{total} reviews...", end='\r')
+                time.sleep(1.0) # Rate limiting: 1 batch per second is much faster than 1 review per second
+
+            # If we completed all reviews
+            print(f"\n✅ Analysis Complete! Processed all {total} reviews.")
             
-            for cat, prio in batch_results:
-                categories.append(cat)
-                priorities.append(prio)
+        except KeyboardInterrupt:
+            print(f"\n\n⚠️ Analysis interrupted by user.")
+            print(f"   Processed {analyzed_count} out of {total} reviews.")
             
-            print(f"   Processed {min(i + BATCH_SIZE, total)}/{total} reviews...", end='\r')
-            time.sleep(1.0) # Rate limiting: 1 batch per second is much faster than 1 review per second
+            if analyzed_count < MIN_REVIEWS_FOR_ROADMAP:
+                print(f"\n❌ Insufficient reviews for roadmap generation.")
+                print(f"   Analyzed: {analyzed_count} reviews")
+                print(f"   Required: {MIN_REVIEWS_FOR_ROADMAP} reviews minimum")
+                print(f"   Partial analysis will still be saved.")
+            else:
+                print(f"   ✅ Sufficient reviews ({analyzed_count} ≥ {MIN_REVIEWS_FOR_ROADMAP}) - roadmap will be generated.")
 
-        df['category'] = categories
-        df['priority'] = priorities
-
+        # Create a dataframe with only analyzed reviews
+        # Take only the rows that were successfully analyzed
+        df_analyzed = df.iloc[:analyzed_count].copy()
+        df_analyzed['category'] = categories
+        df_analyzed['priority'] = priorities
+        
         # Save with suffix
         output_path = file_path.replace(".csv", "_analyzed_ai.csv")
-        df.to_csv(output_path, index=False)
+        df_analyzed.to_csv(output_path, index=False)
         
-        print(f"✅ Analysis Complete! Saved to: {output_path}")
-        print(f"   - Bugs Identified: {len(df[df['category'] == 'Bug Report'])}")
-        print(f"   - Feature Requests: {len(df[df['category'] == 'Feature Request'])}")
+        print(f"\n💾 Analysis saved to: {output_path}")
+        print(f"   - Reviews Analyzed: {len(df_analyzed)}")
+        print(f"   - Bugs Identified: {len(df_analyzed[df_analyzed['category'] == 'Bug Report'])}")
+        print(f"   - Feature Requests: {len(df_analyzed[df_analyzed['category'] == 'Feature Request'])}")
         
-        # Estimate Cost (Flash Tier)
+        # Estimate Cost (Gemini 2.5 Pro pricing)
         # Assumptions: ~60 input tokens per review (incl prompt overhead), ~10 output tokens per review
-        est_input_tokens = total * 60
-        est_output_tokens = total * 10
-        est_cost = (est_input_tokens / 1_000_000 * 0.075) + (est_output_tokens / 1_000_000 * 0.30)
-        print(f"   - Estimated Cost (Flash Tier): ~${est_cost:.4f}")
+        # Gemini 2.5 Pro: $1.25 per 1M input tokens, $5.00 per 1M output tokens
+        est_input_tokens = analyzed_count * 60
+        est_output_tokens = analyzed_count * 10
+        est_cost = (est_input_tokens / 1_000_000 * 1.25) + (est_output_tokens / 1_000_000 * 5.00)
+        print(f"   - Estimated Cost (Gemini 2.5 Pro): ~${est_cost:.4f}")
         
-        # Generate Strategic Roadmap
-        generate_roadmap(model_names, df, app_context, os.path.dirname(file_path))
+        # Generate Strategic Roadmap only if we have enough reviews
+        if analyzed_count >= MIN_REVIEWS_FOR_ROADMAP:
+            print(f"\n🗺️  Generating Product Roadmap (based on {analyzed_count} analyzed reviews)...")
+            generate_roadmap(model_name, df_analyzed, app_context, os.path.dirname(file_path))
+        else:
+            print(f"\n⚠️  Product Roadmap not generated.")
+            print(f"   Reason: Too few reviews analyzed ({analyzed_count} < {MIN_REVIEWS_FOR_ROADMAP} minimum required)")
+            print(f"   The partial analysis has been saved, but a roadmap requires at least {MIN_REVIEWS_FOR_ROADMAP} reviews.")
         
     except Exception as e:
         print(f"❌ Analysis failed: {e}")
